@@ -1,0 +1,354 @@
+#!/bin/bash
+
+#--------------------------------------------
+# 功能：编译xcode项目并打ipa包
+# 使用说明：
+#		编译project
+#			ipa-build <project directory> [-c <project configuration>] [-o <ipa output directory>] [-t <target name>] [-n] [-p <platform identifier>]
+#		编译workspace
+#			ipa-build  <workspace directory> -w -s <schemeName> [-c <project configuration>] [-n]
+#
+# 参数说明：-c NAME				工程的configuration,默认为Release。
+#			-o PATH				生成的ipa文件输出的文件夹（必须为已存在的文件路径）默认为工程根路径下的”build/ipa-build“文件夹中
+#			-t NAME				需要编译的target的名称
+#			-w					编译workspace	
+#			-s NAME				对应workspace下需要编译的scheme
+#			-n					编译前是否先clean工程
+#			-p					平台标识符
+# 作者：ccf
+# E-mail:ccf.developer@gmail.com
+# 创建日期：2012/09/24
+#--------------------------------------------
+# 修改日期：2013/02/18
+# 修改人：ccf
+# 修改内容：打包方式改为使用xcrun命令，并修改第二个参数
+#--------------------------------------------
+# 修改日期：2013/04/25
+# 修改人：ccf
+# 修改内容：采用getopts来处理命令参数，并增加编译前清除选项
+#--------------------------------------------
+# 修改日期：2013/04/26
+# 修改人：ccf
+# 修改内容：增加编译workspace的功能
+#--------------------------------------------
+
+#工程绝对路径
+cd $1
+
+
+project_path=$(pwd)
+
+build_workspace=${project_path}/EJPPurchase.xcworkspace
+
+build_scheme=EJPPurchase
+
+#编译的configuration，默认为Release
+build_config=Release
+
+#build文件夹路径
+build_path=${project_path}/jks_build
+
+#创建build文件夹
+if [ -d ./jks_build ];then
+        rm -rf jks_build
+fi
+mkdir jks_build
+
+#是否clean
+if [ "$should_clean" = "y" ];then
+        xcodebuild clean -configuration ${build_config}
+fi
+
+###########################################
+sed -i "" s/'ProvisioningStyle = Automatic;'/'ProvisioningStyle = Manual;'/g EJPPurchase.xcodeproj/project.pbxproj
+sed -i "" "s/DevelopmentTeam.*$/DevelopmentTeam = NYHMQDP422;/g" EJPPurchase.xcodeproj/project.pbxproj
+sed -i "" "s/DEVELOPMENT_TEAM.*$/DEVELOPMENT_TEAM = NYHMQDP422;/g" EJPPurchase.xcodeproj/project.pbxproj
+sed -i '' "s/PROVISIONING_PROFILE =.*/PROVISIONING_PROFILE = 'b935ea7f-1252-48d6-83e0-dec54a2bb013';/g" EJPPurchase.xcodeproj/project.pbxproj
+sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER =.*/PROVISIONING_PROFILE_SPECIFIER = yijiupi_d;/g" EJPPurchase.xcodeproj/project.pbxproj
+sed -i "" s/'iPhone Developer'/'iPhone Distribution'/g EJPPurchase.xcodeproj/project.pbxproj
+#sed -i "" s/'com.huiayi.jp'/'com.huiayi.re'/g EJPPurchase.xcodeproj/project.pbxproj
+sed -i "" s/'CODE_SIGN_IDENTITY = "";'/'CODE_SIGN_IDENTITY = "iPhone Distribution: Shanghai LandingTech Mdt InfoTech Ltd";'/g EJPPurchase.xcodeproj/project.pbxproj
+sed -ig "/com.apple.Push/{n;s/enabled = 1/enabled = 0/;}" EJPPurchase.xcodeproj/project.pbxproj
+sed -ig "/com.apple.DataProtection/{n;s/enabled = 1/enabled = 0/;}" EJPPurchase.xcodeproj/project.pbxproj
+security unlock-keychain -p 123456 /Users/admin/Library/Keychains/login.keychain-db
+##########################################
+#发布应用的url地址
+pulish_url="https://dn-ejiupi.qbox.me"
+#pulish_url="http://197.255.20.72/IOS"
+
+#生成的app文件目录
+appdirname=Release-iphoneos
+if [ $build_config = Debug ];then
+	appdirname=Debug-iphoneos
+fi
+if [ $build_config = Distribute ];then
+	appdirname=Distribute-iphoneos
+fi
+#编译后文件路径(仅当编译workspace时才会用到)
+compiled_path=${build_path}/${appdirname}
+
+#组合编译命令
+build_cmd='xcodebuild'
+
+if [ "$build_workspace" != "" ];then
+	#编译workspace
+	if [ "$build_scheme" = "" ];then
+		echo "Error! Must provide a scheme by -s option together when using -w option to compile a workspace."
+		exit 2
+	fi
+	build_cmd=${build_cmd}' -workspace '${build_workspace}' -scheme '${build_scheme}' -configuration '${build_config}' CONFIGURATION_BUILD_DIR='${compiled_path}' ONLY_ACTIVE_ARCH=NO'
+
+else
+	#编译project
+	build_cmd=${build_cmd}' -configuration '${build_config}
+
+	if [ "$build_target" != "" ];then
+		build_cmd=${build_cmd}' -target '${build_target}
+	fi
+	
+fi
+
+
+#编译工程
+cd $project_path
+$build_cmd || exit
+
+#进入build路径
+cd $build_path
+
+#创建ipa-build文件夹
+if [ -d ./ipa-build ];then
+	rm -rf ipa-build
+fi
+mkdir ipa-build
+
+
+
+#app文件名称
+appname=$(basename ./${appdirname}/*.app)
+#通过app文件名获得工程target名字
+target_name=$(echo $appname | awk -F. '{print $1}')
+#app文件中Info.plist文件路径
+app_infoplist_path=${build_path}/${appdirname}/${appname}/Info.plist
+#取bundleIdentifier
+bundleIdentifier=$(/usr/libexec/PlistBuddy -c "print CFBundleIdentifier" ${app_infoplist_path})
+#取版本号
+bundleShortVersion=$(/usr/libexec/PlistBuddy -c "print CFBundleShortVersionString" ${app_infoplist_path})
+#取build值
+bundleVersion=$(/usr/libexec/PlistBuddy -c "print CFBundleVersion" ${app_infoplist_path})
+#取displayName
+displayName=$(/usr/libexec/PlistBuddy -c "print CFBundleDisplayName" ${app_infoplist_path})
+#IPA名称
+#ipa_name="${displayName}_${bundleVersion}_$(date +"%d日%H:%M")"
+ipa_name=rel
+echo $ipa_name
+#sed -i "" s/'6_14_AM_dev'/'yjp_test'/g ${app_infoplist_path}
+
+
+#xcrun打包
+xcrun -sdk iphoneos PackageApplication -v ./${appdirname}/*.app -o ${build_path}/ipa-build/${ipa_name}.ipa || exit
+
+if [ -d ./$target_name ];then
+        rm -rf $target_name
+fi
+mkdir $target_name
+
+if [ "$output_path" != "" ];then
+	echo `ls ${build_path}`
+	cp ${build_path}/ipa-build/${ipa_name}.ipa $output_path/${ipa_name}.ipa
+	cp ${build_path}/ipa-build/${ipa_name}.ipa $build_path/EJP/${ipa_name}.ipa
+	echo "Copy ipa file successfully to the path $output_path/${ipa_name}.ipa"
+fi
+
+
+#进入到工程build路径下
+cd $build_path
+
+#显示名称
+#ipa_name="${display_name}"
+
+#拷贝ipa
+#cp ./ipa-build/*.ipa ./$target_name/${ipa_name}.ipa
+#cp ./EJP/Images.xcassets/AppIcon-2.appiconset/Icon@2x.png ./$target_name/${target_name}_logo.png
+cd $target_name
+
+#ipa下载url
+ipa_download_url=${pulish_url}/${target_name}/${ipa_name}.ipa
+#itms-services协议串
+ios_install_url="itms-services://?action=download-manifest&url=${pulish_url}/${target_name}.plist"
+iosre_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJPRE.plist"
+iosol_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJPOL.plist"
+
+ipa_name="${bundleVersion}_$(date +"%d日%H:%M")"
+sed -i "" 2s"/.*/$ipa_name/" /Users/admin/xcode_shell/time.txt
+dev_name=`sed -n '1p' /Users/admin/xcode_shell/time.txt`
+release_name=`sed -n '2p' /Users/admin/xcode_shell/time.txt`
+
+#生成install.html文件
+cat << EOF > index.html
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>安装此软件</title>
+  </head>
+  <body>
+        <pre>
+          <font size="6">
+说明：
+Dev的ipa：这个版本为平常测试用，里面可以切换环境、看错误日志
+Release的ipa：这个版本为要发布到AppStore的版本，
+里面不可以切换环境，默认只有生产环境
+(ps：这个版本的push通知、分享这两个功能目前测试不了，
+需要测试这两个功能的话需要单独打包，但是开发这边会自己测试)
+线上ipa：这个为线上的ipa测试兼容性用的
+请根据需要自行选择测试
+          </font>
+        </pre>
+        <br>
+        <br>
+        <br>
+        <br>
+        <p align=center>
+                <font size="8">
+                        <a href="${ios_install_url}">易酒批Dev${dev_name}.ipa点击安装</a>
+        		<br>
+        		<br>
+                        <a href="${ios_install_url}">易酒批Release${release_name}.ipa点击安装</a>
+        		<br>
+        		<br>
+                        <a href="${iosol_install_url}">易酒批线上包安装</a>
+                </font>
+        </p>
+        
+    </div>
+  </body>
+</html>
+EOF
+
+#生成plist文件
+cat << EOF > ${target_name}.plist
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+   <key>items</key>
+   <array>
+       <dict>
+           <key>assets</key>
+           <array>
+               <dict>
+                   <key>kind</key>
+                   <string>software-package</string>
+                   <key>url</key>
+                   <string>${ipa_download_url}</string>
+               </dict>
+               <dict>
+                   <key>kind</key>
+                   <string>display-image</string>
+                   <key>needs-shine</key>
+                   <true/>
+                   <key>url</key>
+                   <string>${pulish_url}/${target_name}/${target_name}_logo.png</string>
+               </dict>
+               <dict>
+                   <key>kind</key>
+                   <string>full-size-image</string>
+                   <key>needs-shine</key>
+                   <true/>
+                   <key>url</key>
+                   <string>${pulish_url}/${target_name}/${target_name}_logo.png</string>
+               </dict>
+           </array><key>metadata</key>
+           <dict>
+               <key>bundle-identifier</key>
+               <string>${bundleIdentifier}</string>
+               <key>bundle-version</key>
+               <string>${bundleVersion}</string>
+               <key>kind</key>
+               <string>software</string>
+               <key>subtitle</key>
+               <string>${ipa_name}</string>
+               <key>title</key>
+               <string>${ipa_name}</string>
+           </dict>
+       </dict>
+   </array>
+</dict>
+</plist>
+
+EOF
+
+
+#准备上传到七牛云
+#/usr/local/bin/qshell delete ejiupi ${target_name}/index.html
+#/usr/local/bin/qshell fput ejiupi ${target_name}/index.html ${build_path}/EJP/index.html true
+#/usr/local/bin/qshell delete ejiupi ${target_name}/${target_name}.plist
+#/usr/local/bin/qshell fput ejiupi ${target_name}/${target_name}.plist ${build_path}/EJP/${target_name}.plist true
+#/usr/local/bin/qshell fput ejiupi /EJP/${ipa_name}.ipa ${build_path}/ipa-build/${ipa_name}.ipa true
+
+
+
+#并上传到FTP
+#SFTP配置信息
+#用户名
+USER=pack
+
+#密码
+PASSWORD=861020
+
+#待上传文件根目录
+SRCDIR=${build_path}/EJP
+#FTP目录
+DESDIR=IOS/EJP
+#IP
+IP=197.255.20.72
+#端口
+PORT=21
+
+#获取文件
+cd ${SRCDIR} ;
+#目录下的所有文件
+#FILES=`ls` 
+#修改时间在执行时间五分钟之前的xml文件
+#FILES=`find ${SRCDIR} -mmin -50 -name '*.xml'`
+FILES=`ls ${SRCDIR}`
+
+for FILE in ${FILES}
+do
+    echo ${FILE}
+#发送文件 (关键部分）
+#lftp -u ${USER},${PASSWORD} sftp://${IP}:${PORT} <<EOF
+ftp ftp://${USER}:${PASSWORD}@${IP}:${PORT} <<EOF
+cd ${DESDIR}/
+lcd ${SRCDIR}
+put ${FILE}
+by
+EOF
+done
+
+
+
+
+#调用upload脚本来将文件上传到服务器
+#${shell_path}/uploadItemsServicesFiles $target_name ${sftp_server} ${sftp_username} ${sftp_password} ${sftp_workpath} || exit
+
+#切换到tmp目录下
+#serverIndexHtmlName=index.html
+#cd /tmp
+#rm ${serverIndexHtmlName}
+#从服务器下载index.html
+#${shell_path}/sftpDownloadFile ${serverIndexHtmlName} ${sftp_server} ${sftp_username} ${sftp_password} ${sftp_workpath} || exit
+#更新index.html
+#${shell_path}/updateLocalIndexHtml ${display_name} ${bundleShortVersion} ${ipa_download_url} ${ios_install_url} || exit
+#上传index.html
+#${shell_path}/sftpUploadFile ${serverIndexHtmlName} ${sftp_server} ${sftp_username} ${sftp_password} ${sftp_workpath} || exit
+
+
+
+#发送邮件
+#if [ $should_email = y ];then
+#       email_title="${ipa_name}-IOS客户端更新"
+#       email_content="hi,\n\n    The app is updated recently.Use the safari browser on IOS device to download the app.Here is the URL: ${pulish_url}/${target_name} \n\n   To see the list of all iOS projects, open this URL: ${pulish_url} \n\n\n   This email is sent by the automantic shell which is created by ccf,so do not reply this email.\n\n\n\n\n  Thanks!"
+#       ${shell_path}/sendEmail -f ${email_sender} -t ${email_reciver} -s ${email_smtphost} -u ${email_title} -xu ${email_username} -xp ${email_password} -m ${email_content}
+#fi

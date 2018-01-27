@@ -1,0 +1,218 @@
+#!/bin/bash
+
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
+
+#/usr/local/bin/pod install
+/usr/local/bin/pod update
+
+#编译的configuration，默认为Release
+build_config=Debug
+
+
+build_scheme=$(ls | grep xcodeproj | awk -F.xcodeproj '{print $1}')
+echo $build_scheme
+
+build_workspace=$(pwd)
+echo $build_workspace
+
+# 获取xcworkSpace的路径
+workspacePath=${build_workspace}/${build_scheme}.xcworkspace
+
+#生成的app文件目录
+appdirname=Release-iphoneos
+if [ $build_config = Debug ];then
+        appdirname=Debug-iphoneos
+fi
+if [ $build_config = Distribute ];then
+        appdirname=Distribute-iphoneos
+fi
+
+appPath=/Users/admin/Library/Developer/Xcode/DerivedData/Build/Products/${appdirname}/${build_scheme}.app
+
+###########################################
+sed -i "" s/'ProvisioningStyle = Automatic;'/'ProvisioningStyle = Manual;'/g ${build_scheme}.xcodeproj/project.pbxproj
+sed -i "" "s/DevelopmentTeam.*$/DevelopmentTeam = NYHMQDP422;/g" ${build_scheme}.xcodeproj/project.pbxproj
+sed -i "" "s/DEVELOPMENT_TEAM.*$/DEVELOPMENT_TEAM = NYHMQDP422;/g" ${build_scheme}.xcodeproj/project.pbxproj
+sed -i '' "s/PROVISIONING_PROFILE =.*/PROVISIONING_PROFILE = 'b935ea7f-1252-48d6-83e0-dec54a2bb013';/g" ${build_scheme}.xcodeproj/project.pbxproj
+sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER =.*/PROVISIONING_PROFILE_SPECIFIER = yijiupi_d;/g" ${build_scheme}.xcodeproj/project.pbxproj
+sed -i "" s/'iPhone Developer'/'iPhone Distribution'/g ${build_scheme}.xcodeproj/project.pbxproj
+sed -i "" s/'com.ejp.deliver'/'com.huiayi.deliver'/g ${build_scheme}.xcodeproj/project.pbxproj
+sed -i "" s/'CODE_SIGN_IDENTITY = "";'/'CODE_SIGN_IDENTITY = "iPhone Distribution: Shanghai LandingTech Mdt InfoTech Ltd";'/g ${build_scheme}.xcodeproj/project.pbxproj
+sed -i "" s/'com.EJiuPi.EJiuPiBroker'/'com.huiayi.jjr'/g ${build_scheme}.xcodeproj/project.pbxproj
+sed -ig "/com.apple.Push/{n;s/enabled = 1/enabled = 0/;}" ${build_scheme}.xcodeproj/project.pbxproj
+sed -ig "/com.apple.ApplicationGroups.iOS/{n;s/enabled = 1/enabled = 0/;}" ${build_scheme}.xcodeproj/project.pbxproj
+sed -ig "/com.apple.DataProtection/{n;s/enabled = 1/enabled = 0/;}" ${build_scheme}.xcodeproj/project.pbxproj
+security unlock-keychain -p 123456 /Users/admin/Library/Keychains/login.keychain-db
+##########################################
+
+#删除消息等功能
+cat << EOF > ${build_scheme}/${build_scheme}.entitlements
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict/>
+</plist>
+EOF
+
+#发布应用的url地址
+pulish_url="https://dn-ejiupi.qbox.me"
+
+#组合编译命令
+build_cmd='xcodebuild'
+
+xcodebuild clean -configuration ${build_config}
+
+if [ "$build_workspace" != "" ];then
+	#编译workspace
+	if [ "$build_scheme" = "" ];then
+		echo "Error! Must provide a scheme by -s option together when using -w option to compile a workspace."
+		exit 2
+	fi
+	xcodebuild -workspace ${workspacePath} -scheme ${build_scheme} -configuration ${build_config} ONLY_ACTIVE_ARCH=NO || exit
+fi
+
+#创建ipa-build文件夹
+if [ -d ./ipa-build ];then
+        rm -rf ipa-build
+fi
+mkdir ipa-build
+
+#app文件名称
+appname=$(basename ./${appdirname}/*.app)
+#通过app文件名获得工程target名字
+target_name=$(echo $appname | awk -F. '{print $1}')
+#app文件中Info.plist文件路径
+app_infoplist_path=${build_path}/${appdirname}/${appname}/Info.plist
+#取bundleIdentifier
+bundleIdentifier=$(/usr/libexec/PlistBuddy -c "print CFBundleIdentifier" ${app_infoplist_path})
+#取版本号
+bundleShortVersion=$(/usr/libexec/PlistBuddy -c "print CFBundleShortVersionString" ${app_infoplist_path})
+#取build值
+bundleVersion=$(/usr/libexec/PlistBuddy -c "print CFBundleVersion" ${appPath}/Info.plist)
+#IPA名称
+ipa_name=YJP
+
+#xcrun打包
+xcrun -sdk iphoneos PackageApplication -v ${appPath} -o ${build_workspace}/ipa-build/${ipa_name}.ipa || exit
+
+#itms-services协议串
+ios_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJP.plist"
+iosre_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJPRE.plist"
+iosol_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJPOL.plist"
+ios_yjc_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJC.plist"
+ios_yps_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EPS.plist"
+iosold_install_url="itms-services://?action=download-manifest&url=${pulish_url}/EJPOLD.plist"
+jjr_install_url="itms-services://?action=download-manifest&url=${pulish_url}/JJR.plist"
+
+ipa_name="$(date +"%d日%H:%M")"
+/usr/bin/sed -i "" "6s#.*#$ipa_name#" /Users/admin/xcode_shell/time.txt
+dev_name=`sed -n '1p' /Users/admin/xcode_shell/time.txt`
+release_name=`sed -n '2p' /Users/admin/xcode_shell/time.txt`
+yjc_name=`sed -n '3p' /Users/admin/xcode_shell/time.txt`
+yps_name=`sed -n '4p' /Users/admin/xcode_shell/time.txt`
+jjr_name=`sed -n '5p' /Users/admin/xcode_shell/time.txt`
+yjp_name=`sed -n '6p' /Users/admin/xcode_shell/time.txt`
+
+
+cd ${build_workspace}/ipa-build
+
+#生成install.html文件
+cat << EOF > index.html
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>安装此软件</title>
+  </head>
+  <body>
+        <pre>
+          <font size="6">
+说明：
+Dev的ipa：这个版本为平常测试用，里面可以切换环境、看错误日志
+Release的ipa：这个版本为要发布到AppStore的版本，
+里面不可以切换环境，默认只有生产环境
+(ps：这个版本的push通知、分享这两个功能目前测试不了，
+需要测试这两个功能的话需要单独打包，但是开发这边会自己测试)
+线上ipa：这个为线上的ipa测试兼容性用的
+请根据需要自行选择测试
+          </font>
+        </pre>
+        <br>
+        <br>
+        <br>
+        <br>
+        <p align=center>
+                <font size="8">
+                        <a href="${ios_install_url}">易酒批Dev${dev_name}.ipa点击安装</a>
+        		<br>
+        		<br>
+                        <a href="${ios_install_url}">易酒批Release${release_name}.ipa点击安装</a>
+        		<br>
+        		<br>
+                        <a href="${ios_install_url}">易酒批v2.2.9${yjp_name}.ipa点击安装</a>
+        		<br>
+        		<br>
+                        <a href="${ios_yjc_install_url}">易酒采${yjc_name}.ipa点击安装</a>
+        		<br>
+        		<br>
+                        <a href="${ios_yps_install_url}">易配送${yps_name}.ipa包安装</a>
+        		<br>
+        		<br>
+                        <a href="${jjr_install_url}">经纪人${jjr_name}.ipa包安装</a>
+        		<br>
+        		<br>
+                        <a href="${iosol_install_url}">EJP2.2.7.ipa包安装</a>
+        		<br>
+        		<br>
+                        <a href="${iosold_install_url}">EJP2.2.8DEBUG.ipa包安装</a>
+                </font>
+        </p>
+        
+    </div>
+  </body>
+</html>
+EOF
+
+
+#并上传到FTP
+#SFTP配置信息
+#用户名
+USER=pack
+
+#密码
+PASSWORD=861020
+
+#待上传文件根目录
+SRCDIR=${build_workspace}/ipa-build
+echo "this is test var ${SRCDIR}"
+#FTP目录
+DESDIR=IOS/EJP
+#IP
+IP=197.255.20.72
+#端口
+PORT=21
+
+#获取文件
+cd ${SRCDIR}
+#目录下的所有文件
+#FILES=`ls` 
+#修改时间在执行时间五分钟之前的xml文件
+#FILES=`find ${SRCDIR} -mmin -50 -name '*.xml'`
+FILES=`ls ${SRCDIR}`
+
+for FILE in ${FILES}
+do
+    echo ${FILE}
+#发送文件 (关键部分）
+#lftp -u ${USER},${PASSWORD} sftp://${IP}:${PORT} <<EOF
+ftp ftp://${USER}:${PASSWORD}@${IP}:${PORT} <<EOF
+cd ${DESDIR}/
+lcd ${SRCDIR}
+put ${FILE}
+by
+EOF
+done
+
